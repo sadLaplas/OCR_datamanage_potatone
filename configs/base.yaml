@@ -1,0 +1,6 @@
+project_name: docmanage
+run_mode: development
+data_dir: ../data
+artifacts_dir: ../artifacts
+temp_dir: ../tmp
+log_level: INFO
