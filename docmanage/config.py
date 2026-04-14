@@ -38,6 +38,10 @@ class AppConfig:
             "temp": self.temp_dir,
         }
 
+    @property
+    def manifest_path(self) -> Path:
+        return self.artifacts_dir / "manifest.json"
+
 
 def load_config(config_path: str | Path) -> AppConfig:
     path = Path(config_path).expanduser()
