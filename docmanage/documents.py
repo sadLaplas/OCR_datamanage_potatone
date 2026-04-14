@@ -97,6 +97,26 @@ def register_documents(
     return new_documents, manifest_path
 
 
+def find_registered_document_by_id(
+    config: AppConfig, document_id: str
+) -> RegisteredDocument | None:
+    for document in load_manifest(config.manifest_path):
+        if document.document_id == document_id:
+            return document
+    return None
+
+
+def find_registered_document_by_path(
+    config: AppConfig, file_path: Path
+) -> RegisteredDocument | None:
+    absolute_path = str(file_path.resolve())
+
+    for document in load_manifest(config.manifest_path):
+        if document.absolute_path == absolute_path:
+            return document
+    return None
+
+
 def resolve_input_file(raw_path: str) -> Path:
     path = Path(raw_path).expanduser()
 

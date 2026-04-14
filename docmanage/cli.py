@@ -12,6 +12,7 @@ from .documents import (
     register_documents,
 )
 from .logger import setup_logging
+from .pdf_ingestion import PdfIngestionError, PdfIngestionResult, ingest_pdf
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,19 +25,31 @@ def main(argv: list[str] | None = None) -> int:
         directory_statuses = prepare_directories(config)
         if args.command == "register":
             registered_documents, manifest_path = register_documents(config, args.paths)
+            pdf_result = None
+        elif args.command == "ingest-pdf":
+            pdf_result = ingest_pdf(config, args.source)
+            registered_documents = []
+            manifest_path = config.manifest_path
         else:
             registered_documents = []
             manifest_path = config.manifest_path
+            pdf_result = None
     except ConfigError as error:
         print(f"Ошибка конфигурации: {error}", file=sys.stderr)
         return 1
     except DocumentRegistrationError as error:
         print(f"Ошибка регистрации: {error}", file=sys.stderr)
         return 1
+    except PdfIngestionError as error:
+        print(f"Ошибка PDF ingestion: {error}", file=sys.stderr)
+        return 1
 
     if args.command == "register":
         logger.info("Документы зарегистрированы.")
         print(render_registration_report(registered_documents, manifest_path))
+    elif args.command == "ingest-pdf":
+        logger.info("PDF обработан.")
+        print(render_pdf_ingestion_report(pdf_result))
     else:
         logger.info("Конфигурация загружена.")
         print(render_report(config, directory_statuses))
@@ -62,6 +75,14 @@ def build_parser() -> argparse.ArgumentParser:
         "paths",
         nargs="*",
         help="Пути к файлам для регистрации.",
+    )
+    ingest_pdf_parser = subparsers.add_parser(
+        "ingest-pdf",
+        help="Читает PDF и сохраняет постраничный manifest.",
+    )
+    ingest_pdf_parser.add_argument(
+        "source",
+        help="Путь к PDF или document_id зарегистрированного PDF.",
     )
     return parser
 
@@ -98,4 +119,18 @@ def render_registration_report(
             f"- {document.document_id} | {document.document_kind} | {document.original_name}"
         )
 
+    return "\n".join(lines)
+
+
+def render_pdf_ingestion_report(result: PdfIngestionResult | None) -> str:
+    if result is None:
+        return "PDF не обработан."
+
+    lines = [
+        f"Документ: {result.document_id}",
+        f"Файл: {result.original_name}",
+        f"Страниц: {result.page_count}",
+        f"Страниц с текстовым слоем: {result.text_layer_page_count}",
+        f"Page manifest: {result.page_manifest_path}",
+    ]
     return "\n".join(lines)
