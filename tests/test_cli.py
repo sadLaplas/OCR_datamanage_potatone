@@ -2,6 +2,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tests.image_helpers import create_image
 from tests.pdf_helpers import create_pdf
 
 
@@ -120,3 +121,43 @@ def test_cli_ingests_pdf(tmp_path: Path) -> None:
     assert "Страниц: 2" in result.stdout
     assert "Страниц с текстовым слоем: 1" in result.stdout
     assert "page_manifest.json" in result.stdout
+
+
+def test_cli_ingests_image(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "project_name: docmanage-test",
+                "run_mode: test",
+                "data_dir: data",
+                "artifacts_dir: artifacts",
+                "temp_dir: tmp",
+                "log_level: INFO",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    image_path = create_image(tmp_path / "scan.png", size=(220, 330), mode="L", color=200)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "ingest-image",
+            str(image_path),
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Изображение обработано." in result.stdout
+    assert "Размер: 220x330" in result.stdout
+    assert "Page manifest:" in result.stdout
+    assert "normalized_page.png" in result.stdout

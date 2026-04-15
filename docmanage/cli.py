@@ -11,6 +11,11 @@ from .documents import (
     RegisteredDocument,
     register_documents,
 )
+from .image_ingestion import (
+    ImageIngestionError,
+    ImageIngestionResult,
+    ingest_image,
+)
 from .logger import setup_logging
 from .pdf_ingestion import PdfIngestionError, PdfIngestionResult, ingest_pdf
 
@@ -26,14 +31,22 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "register":
             registered_documents, manifest_path = register_documents(config, args.paths)
             pdf_result = None
+            image_result = None
         elif args.command == "ingest-pdf":
             pdf_result = ingest_pdf(config, args.source)
             registered_documents = []
             manifest_path = config.manifest_path
+            image_result = None
+        elif args.command == "ingest-image":
+            image_result = ingest_image(config, args.source)
+            registered_documents = []
+            manifest_path = config.manifest_path
+            pdf_result = None
         else:
             registered_documents = []
             manifest_path = config.manifest_path
             pdf_result = None
+            image_result = None
     except ConfigError as error:
         print(f"Ошибка конфигурации: {error}", file=sys.stderr)
         return 1
@@ -43,6 +56,9 @@ def main(argv: list[str] | None = None) -> int:
     except PdfIngestionError as error:
         print(f"Ошибка PDF ingestion: {error}", file=sys.stderr)
         return 1
+    except ImageIngestionError as error:
+        print(f"Ошибка image ingestion: {error}", file=sys.stderr)
+        return 1
 
     if args.command == "register":
         logger.info("Документы зарегистрированы.")
@@ -50,6 +66,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "ingest-pdf":
         logger.info("PDF обработан.")
         print(render_pdf_ingestion_report(pdf_result))
+    elif args.command == "ingest-image":
+        logger.info("Изображение обработано.")
+        print(render_image_ingestion_report(image_result))
     else:
         logger.info("Конфигурация загружена.")
         print(render_report(config, directory_statuses))
@@ -83,6 +102,14 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_pdf_parser.add_argument(
         "source",
         help="Путь к PDF или document_id зарегистрированного PDF.",
+    )
+    ingest_image_parser = subparsers.add_parser(
+        "ingest-image",
+        help="Читает изображение и сохраняет page manifest.",
+    )
+    ingest_image_parser.add_argument(
+        "source",
+        help="Путь к PNG/JPG/JPEG или document_id зарегистрированного изображения.",
     )
     return parser
 
@@ -132,5 +159,21 @@ def render_pdf_ingestion_report(result: PdfIngestionResult | None) -> str:
         f"Страниц: {result.page_count}",
         f"Страниц с текстовым слоем: {result.text_layer_page_count}",
         f"Page manifest: {result.page_manifest_path}",
+    ]
+    return "\n".join(lines)
+
+
+def render_image_ingestion_report(result: ImageIngestionResult | None) -> str:
+    if result is None:
+        return "Изображение не обработано."
+
+    page = result.pages[0]
+    lines = [
+        f"Документ: {result.document_id}",
+        f"Файл: {result.original_name}",
+        f"Размер: {page.width}x{page.height}",
+        f"Режим: {page.image_mode}",
+        f"Page manifest: {result.page_manifest_path}",
+        f"Нормализованная копия: {result.normalized_image_path}",
     ]
     return "\n".join(lines)
