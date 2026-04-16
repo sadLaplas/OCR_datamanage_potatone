@@ -2,7 +2,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tests.image_helpers import create_image
+from tests.image_helpers import create_document_like_image, create_image
 from tests.pdf_helpers import create_pdf
 
 
@@ -34,9 +34,9 @@ def test_cli_starts_with_valid_config(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
-    assert "Конфигурация загружена." in result.stdout
+    assert "Все ок." in result.stdout
     assert "Проект: docmanage-test" in result.stdout
-    assert "Статус: конфигурация и окружение доступны." in result.stdout
+    assert "Файл manifest:" in result.stdout
 
 
 def test_cli_registers_documents(tmp_path: Path) -> None:
@@ -77,8 +77,8 @@ def test_cli_registers_documents(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
-    assert "Документы зарегистрированы." in result.stdout
-    assert "Зарегистрировано документов: 2" in result.stdout
+    assert "Файлы добавлены." in result.stdout
+    assert "Добавил файлов: 2" in result.stdout
     assert "image" in result.stdout
     assert "spreadsheet" in result.stdout
 
@@ -117,10 +117,10 @@ def test_cli_ingests_pdf(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
-    assert "PDF обработан." in result.stdout
+    assert "PDF готов." in result.stdout
     assert "Страниц: 2" in result.stdout
-    assert "Страниц с текстовым слоем: 1" in result.stdout
-    assert "page_manifest.json" in result.stdout
+    assert "Страниц с текстом: 1" in result.stdout
+    assert "Сохранил страницы:" in result.stdout
 
 
 def test_cli_ingests_image(tmp_path: Path) -> None:
@@ -157,7 +157,47 @@ def test_cli_ingests_image(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0
-    assert "Изображение обработано." in result.stdout
+    assert "Картинка готова." in result.stdout
     assert "Размер: 220x330" in result.stdout
-    assert "Page manifest:" in result.stdout
-    assert "normalized_page.png" in result.stdout
+    assert "Сохранил manifest:" in result.stdout
+    assert "Сохранил копию:" in result.stdout
+
+
+def test_cli_preprocesses_image(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "project_name: docmanage-test",
+                "run_mode: test",
+                "data_dir: data",
+                "artifacts_dir: artifacts",
+                "temp_dir: tmp",
+                "log_level: INFO",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    image_path = create_document_like_image(tmp_path / "scan.png")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "preprocess-image",
+            str(image_path),
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Обработка завершена." in result.stdout
+    assert "Шаги:" in result.stdout
+    assert "Сохранил результат:" in result.stdout
+    assert "Сохранил метаданные:" in result.stdout
