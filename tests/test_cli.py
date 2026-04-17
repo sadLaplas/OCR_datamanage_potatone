@@ -201,3 +201,48 @@ def test_cli_preprocesses_image(tmp_path: Path) -> None:
     assert "Шаги:" in result.stdout
     assert "Сохранил результат:" in result.stdout
     assert "Сохранил метаданные:" in result.stdout
+
+
+def test_cli_generates_ocr_dataset(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "project_name: docmanage-test",
+                "run_mode: test",
+                "data_dir: data",
+                "artifacts_dir: artifacts",
+                "temp_dir: tmp",
+                "log_level: INFO",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "ocr_dataset"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "generate-ocr-data",
+            "--demo",
+            "--output",
+            str(output_dir),
+            "--seed",
+            "5",
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Готово." in result.stdout
+    assert "Всего примеров: 12" in result.stdout
+    assert "Train:" in result.stdout
+    assert "Val:" in result.stdout
+    assert "Аннотации train:" in result.stdout

@@ -22,6 +22,11 @@ from .image_preprocessing import (
     preprocess_image,
 )
 from .logger import setup_logging
+from .ocr_dataset_generation import (
+    OcrDatasetError,
+    OcrDatasetResult,
+    generate_ocr_dataset,
+)
 from .pdf_ingestion import PdfIngestionError, PdfIngestionResult, ingest_pdf
 
 
@@ -38,30 +43,49 @@ def main(argv: list[str] | None = None) -> int:
             pdf_result = None
             image_result = None
             preprocess_result = None
+            dataset_result = None
         elif args.command == "ingest-pdf":
             pdf_result = ingest_pdf(config, args.source)
             registered_documents = []
             manifest_path = config.manifest_path
             image_result = None
             preprocess_result = None
+            dataset_result = None
         elif args.command == "ingest-image":
             image_result = ingest_image(config, args.source)
             registered_documents = []
             manifest_path = config.manifest_path
             pdf_result = None
             preprocess_result = None
+            dataset_result = None
         elif args.command == "preprocess-image":
             preprocess_result = preprocess_image(config, args.source)
             registered_documents = []
             manifest_path = config.manifest_path
             pdf_result = None
             image_result = None
+            dataset_result = None
+        elif args.command == "generate-ocr-data":
+            dataset_result = generate_ocr_dataset(
+                config,
+                output_dir=args.output,
+                count=args.count,
+                val_ratio=args.val_ratio,
+                seed=args.seed,
+                demo=args.demo,
+            )
+            registered_documents = []
+            manifest_path = config.manifest_path
+            pdf_result = None
+            image_result = None
+            preprocess_result = None
         else:
             registered_documents = []
             manifest_path = config.manifest_path
             pdf_result = None
             image_result = None
             preprocess_result = None
+            dataset_result = None
     except ConfigError as error:
         print(f"Проблема с конфигом: {error}", file=sys.stderr)
         return 1
@@ -77,6 +101,9 @@ def main(argv: list[str] | None = None) -> int:
     except ImagePreprocessError as error:
         print(f"Не получилось подготовить картинку: {error}", file=sys.stderr)
         return 1
+    except OcrDatasetError as error:
+        print(f"Не получилось собрать датасет: {error}", file=sys.stderr)
+        return 1
 
     if args.command == "register":
         logger.info("Файлы добавлены.")
@@ -90,6 +117,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "preprocess-image":
         logger.info("Обработка завершена.")
         print(render_preprocess_report(preprocess_result))
+    elif args.command == "generate-ocr-data":
+        logger.info("Готово.")
+        print(render_dataset_report(dataset_result))
     else:
         logger.info("Все ок.")
         print(render_report(config, directory_statuses))
@@ -139,6 +169,38 @@ def build_parser() -> argparse.ArgumentParser:
     preprocess_image_parser.add_argument(
         "source",
         help="Путь к картинке или document_id зарегистрированного изображения.",
+    )
+    generate_dataset_parser = subparsers.add_parser(
+        "generate-ocr-data",
+        help="Делает маленький OCR датасет из строк.",
+    )
+    generate_dataset_parser.add_argument(
+        "--output",
+        default=None,
+        help="Куда сохранить датасет.",
+    )
+    generate_dataset_parser.add_argument(
+        "--count",
+        type=int,
+        default=100,
+        help="Сколько примеров сделать.",
+    )
+    generate_dataset_parser.add_argument(
+        "--val-ratio",
+        type=float,
+        default=0.2,
+        help="Доля для val.",
+    )
+    generate_dataset_parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Сид для генерации.",
+    )
+    generate_dataset_parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Сделать маленький demo-набор.",
     )
     return parser
 
@@ -228,4 +290,23 @@ def render_preprocess_report(result: ImagePreprocessResult | None) -> str:
 
     lines.append(f"Сохранил результат: {result.preprocessed_image_path}")
     lines.append(f"Сохранил метаданные: {result.metadata_path}")
+    return "\n".join(lines)
+
+
+def render_dataset_report(result: OcrDatasetResult | None) -> str:
+    if result is None:
+        return "Датасет пока не готов."
+
+    lines = [
+        f"Папка: {result.output_dir}",
+        f"Всего примеров: {result.total_samples}",
+        f"Train: {result.train_samples}",
+        f"Val: {result.val_samples}",
+        f"Аннотации train: {result.train_annotations_path}",
+        f"Аннотации val: {result.val_annotations_path}",
+        f"Метаданные: {result.metadata_path}",
+    ]
+
+    if result.fonts_used:
+        lines.append(f"Шрифты: {', '.join(result.fonts_used)}")
     return "\n".join(lines)
