@@ -246,3 +246,70 @@ def test_cli_generates_ocr_dataset(tmp_path: Path) -> None:
     assert "Train:" in result.stdout
     assert "Val:" in result.stdout
     assert "Аннотации train:" in result.stdout
+
+
+def test_cli_checks_ocr_model(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "project_name: docmanage-test",
+                "run_mode: test",
+                "data_dir: data",
+                "artifacts_dir: artifacts",
+                "temp_dir: tmp",
+                "log_level: INFO",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "ocr_dataset"
+
+    generate_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "generate-ocr-data",
+            "--demo",
+            "--output",
+            str(output_dir),
+            "--seed",
+            "7",
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert generate_result.returncode == 0
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "check-ocr-model",
+            "--dataset",
+            str(output_dir),
+            "--batch-size",
+            "3",
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Проверка готова." in result.stdout
+    assert "Модель создалась." in result.stdout
+    assert "Входной батч:" in result.stdout
+    assert "Выход модели:" in result.stdout
+    assert "Прогон батча прошел нормально." in result.stdout
+    assert "Похоже, все работает." in result.stdout

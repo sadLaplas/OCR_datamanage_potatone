@@ -27,6 +27,7 @@ from .ocr_dataset_generation import (
     OcrDatasetResult,
     generate_ocr_dataset,
 )
+from .ocr_model import OcrModelCheckResult, OcrModelError, run_ocr_model_check
 from .pdf_ingestion import PdfIngestionError, PdfIngestionResult, ingest_pdf
 
 
@@ -44,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
             image_result = None
             preprocess_result = None
             dataset_result = None
+            model_check_result = None
         elif args.command == "ingest-pdf":
             pdf_result = ingest_pdf(config, args.source)
             registered_documents = []
@@ -51,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
             image_result = None
             preprocess_result = None
             dataset_result = None
+            model_check_result = None
         elif args.command == "ingest-image":
             image_result = ingest_image(config, args.source)
             registered_documents = []
@@ -58,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
             pdf_result = None
             preprocess_result = None
             dataset_result = None
+            model_check_result = None
         elif args.command == "preprocess-image":
             preprocess_result = preprocess_image(config, args.source)
             registered_documents = []
@@ -65,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
             pdf_result = None
             image_result = None
             dataset_result = None
+            model_check_result = None
         elif args.command == "generate-ocr-data":
             dataset_result = generate_ocr_dataset(
                 config,
@@ -79,6 +84,20 @@ def main(argv: list[str] | None = None) -> int:
             pdf_result = None
             image_result = None
             preprocess_result = None
+            model_check_result = None
+        elif args.command == "check-ocr-model":
+            model_check_result = run_ocr_model_check(
+                config,
+                dataset_path=args.dataset,
+                split=args.split,
+                batch_size=args.batch_size,
+            )
+            registered_documents = []
+            manifest_path = config.manifest_path
+            pdf_result = None
+            image_result = None
+            preprocess_result = None
+            dataset_result = None
         else:
             registered_documents = []
             manifest_path = config.manifest_path
@@ -86,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
             image_result = None
             preprocess_result = None
             dataset_result = None
+            model_check_result = None
     except ConfigError as error:
         print(f"Проблема с конфигом: {error}", file=sys.stderr)
         return 1
@@ -104,6 +124,9 @@ def main(argv: list[str] | None = None) -> int:
     except OcrDatasetError as error:
         print(f"Не получилось собрать датасет: {error}", file=sys.stderr)
         return 1
+    except OcrModelError as error:
+        print(f"Не получилось проверить модель: {error}", file=sys.stderr)
+        return 1
 
     if args.command == "register":
         logger.info("Файлы добавлены.")
@@ -120,6 +143,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "generate-ocr-data":
         logger.info("Готово.")
         print(render_dataset_report(dataset_result))
+    elif args.command == "check-ocr-model":
+        logger.info("Проверка готова.")
+        print(render_model_check_report(model_check_result))
     else:
         logger.info("Все ок.")
         print(render_report(config, directory_statuses))
@@ -183,7 +209,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--count",
         type=int,
         default=100,
-        help="Сколько примеров сделать.",
+        help="Сколько примеров",
     )
     generate_dataset_parser.add_argument(
         "--val-ratio",
@@ -200,7 +226,28 @@ def build_parser() -> argparse.ArgumentParser:
     generate_dataset_parser.add_argument(
         "--demo",
         action="store_true",
-        help="Сделать маленький demo-набор.",
+        help="Сделать маленький demo",
+    )
+    check_model_parser = subparsers.add_parser(
+        "check-ocr-model",
+        help="Проверяет OCR модель на одном батче.",
+    )
+    check_model_parser.add_argument(
+        "--dataset",
+        default=None,
+        help="Путь к OCR датасету.",
+    )
+    check_model_parser.add_argument(
+        "--split",
+        default="train",
+        choices=("train", "val"),
+        help="Какой split взять.",
+    )
+    check_model_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=4,
+        help="Размер батча для проверки.",
     )
     return parser
 
@@ -310,3 +357,22 @@ def render_dataset_report(result: OcrDatasetResult | None) -> str:
     if result.fonts_used:
         lines.append(f"Шрифты: {', '.join(result.fonts_used)}")
     return "\n".join(lines)
+
+
+def render_model_check_report(result: OcrModelCheckResult | None) -> str:
+    if result is None:
+        return "Модель пока не проверена."
+
+    return "\n".join(
+        [
+            "Модель создалась.",
+            f"Папка с датасетом: {result.dataset_path}",
+            f"Беру split: {result.split}",
+            f"Входной батч: {result.batch_shape}",
+            f"Выход модели: {result.logits_shape}",
+            f"Длины выхода: {result.output_lengths}",
+            f"Число классов: {result.num_classes}",
+            "Прогон батча прошел нормально.",
+            "Похоже, все работает.",
+        ]
+    )
