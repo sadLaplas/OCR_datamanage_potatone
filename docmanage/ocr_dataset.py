@@ -28,6 +28,10 @@ class OcrCharset:
     def size(self) -> int:
         return len(self.characters) + 1
 
+    @property
+    def blank_index(self) -> int:
+        return 0
+
     def encode(self, text: str) -> list[int]:
         if not text:
             raise OcrDatasetError("Текст в выборке не должен быть пустым.")

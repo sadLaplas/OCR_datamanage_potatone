@@ -28,6 +28,12 @@ from .ocr_dataset_generation import (
     generate_ocr_dataset,
 )
 from .ocr_model import OcrModelCheckResult, OcrModelError, run_ocr_model_check
+from .ocr_training import (
+    OcrTrainingConfig,
+    OcrTrainingError,
+    OcrTrainingResult,
+    run_ocr_training,
+)
 from .pdf_ingestion import PdfIngestionError, PdfIngestionResult, ingest_pdf
 
 
@@ -46,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
             preprocess_result = None
             dataset_result = None
             model_check_result = None
+            training_result = None
         elif args.command == "ingest-pdf":
             pdf_result = ingest_pdf(config, args.source)
             registered_documents = []
@@ -54,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
             preprocess_result = None
             dataset_result = None
             model_check_result = None
+            training_result = None
         elif args.command == "ingest-image":
             image_result = ingest_image(config, args.source)
             registered_documents = []
@@ -62,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
             preprocess_result = None
             dataset_result = None
             model_check_result = None
+            training_result = None
         elif args.command == "preprocess-image":
             preprocess_result = preprocess_image(config, args.source)
             registered_documents = []
@@ -70,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
             image_result = None
             dataset_result = None
             model_check_result = None
+            training_result = None
         elif args.command == "generate-ocr-data":
             dataset_result = generate_ocr_dataset(
                 config,
@@ -85,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
             image_result = None
             preprocess_result = None
             model_check_result = None
+            training_result = None
         elif args.command == "check-ocr-model":
             model_check_result = run_ocr_model_check(
                 config,
@@ -98,6 +109,28 @@ def main(argv: list[str] | None = None) -> int:
             image_result = None
             preprocess_result = None
             dataset_result = None
+            training_result = None
+        elif args.command == "train-ocr":
+            training_result = run_ocr_training(
+                config,
+                dataset_path=args.dataset,
+                output_dir=args.output,
+                training_config=OcrTrainingConfig(
+                    epochs=args.epochs,
+                    batch_size=args.batch_size,
+                    learning_rate=args.learning_rate,
+                    device=args.device,
+                    demo=args.demo,
+                    seed=args.seed,
+                ),
+            )
+            registered_documents = []
+            manifest_path = config.manifest_path
+            pdf_result = None
+            image_result = None
+            preprocess_result = None
+            dataset_result = None
+            model_check_result = None
         else:
             registered_documents = []
             manifest_path = config.manifest_path
@@ -106,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
             preprocess_result = None
             dataset_result = None
             model_check_result = None
+            training_result = None
     except ConfigError as error:
         print(f"Проблема с конфигом: {error}", file=sys.stderr)
         return 1
@@ -127,6 +161,9 @@ def main(argv: list[str] | None = None) -> int:
     except OcrModelError as error:
         print(f"Не получилось проверить модель: {error}", file=sys.stderr)
         return 1
+    except OcrTrainingError as error:
+        print(f"Не получилось запустить обучение: {error}", file=sys.stderr)
+        return 1
 
     if args.command == "register":
         logger.info("Файлы добавлены.")
@@ -146,6 +183,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "check-ocr-model":
         logger.info("Проверка готова.")
         print(render_model_check_report(model_check_result))
+    elif args.command == "train-ocr":
+        logger.info("Обучение завершено.")
+        print(render_training_report(training_result))
     else:
         logger.info("Все ок.")
         print(render_report(config, directory_statuses))
@@ -248,6 +288,54 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=4,
         help="Размер батча для проверки.",
+    )
+    train_parser = subparsers.add_parser(
+        "train-ocr",
+        help="Запускает первое обучение OCR модели.",
+    )
+    train_parser.add_argument(
+        "--dataset",
+        default=None,
+        help="Путь к OCR датасету.",
+    )
+    train_parser.add_argument(
+        "--output",
+        default=None,
+        help="Куда сохранить чекпоинт и историю.",
+    )
+    train_parser.add_argument(
+        "--epochs",
+        type=int,
+        default=5,
+        help="Сколько эпох запускать.",
+    )
+    train_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=8,
+        help="Размер батча.",
+    )
+    train_parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=0.001,
+        help="Learning rate.",
+    )
+    train_parser.add_argument(
+        "--device",
+        default="cpu",
+        help="Устройство: cpu, cuda, mps или auto.",
+    )
+    train_parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Seed для обучения.",
+    )
+    train_parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Сделать короткий demo-run.",
     )
     return parser
 
@@ -376,3 +464,31 @@ def render_model_check_report(result: OcrModelCheckResult | None) -> str:
             "Похоже, все работает.",
         ]
     )
+
+
+def render_training_report(result: OcrTrainingResult | None) -> str:
+    if result is None:
+        return "Обучение пока не запустилось."
+
+    lines = [
+        "Начинаю обучение.",
+        f"Папка с датасетом: {result.dataset_path}",
+        f"Папка с результатом: {result.output_dir}",
+        f"Устройство: {result.device}",
+    ]
+
+    for epoch in result.history:
+        line = (
+            f"Эпоха {epoch.epoch} из {result.epochs_ran}"
+            f" | Train loss: {epoch.train_loss:.4f}"
+            f" | Val loss: {epoch.val_loss:.4f}"
+        )
+        if epoch.was_best:
+            line += " | сохранил лучший чекпоинт"
+        lines.append(line)
+
+    lines.append(f"Лучший val loss: {result.best_val_loss:.4f}")
+    lines.append(f"Сохранил лучший чекпоинт: {result.best_checkpoint_path}")
+    lines.append(f"Сохранил историю: {result.history_path}")
+    lines.append("Обучение завершено.")
+    return "\n".join(lines)

@@ -313,3 +313,77 @@ def test_cli_checks_ocr_model(tmp_path: Path) -> None:
     assert "Выход модели:" in result.stdout
     assert "Прогон батча прошел нормально." in result.stdout
     assert "Похоже, все работает." in result.stdout
+
+
+def test_cli_trains_ocr_model(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "project_name: docmanage-test",
+                "run_mode: test",
+                "data_dir: data",
+                "artifacts_dir: artifacts",
+                "temp_dir: tmp",
+                "log_level: INFO",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    dataset_dir = tmp_path / "ocr_dataset"
+    output_dir = tmp_path / "ocr_training"
+
+    generate_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "generate-ocr-data",
+            "--demo",
+            "--output",
+            str(dataset_dir),
+            "--seed",
+            "8",
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert generate_result.returncode == 0
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "train-ocr",
+            "--dataset",
+            str(dataset_dir),
+            "--output",
+            str(output_dir),
+            "--demo",
+            "--batch-size",
+            "4",
+            "--seed",
+            "8",
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Обучение завершено." in result.stdout
+    assert "Начинаю обучение." in result.stdout
+    assert "Эпоха 1 из 1" in result.stdout
+    assert "Train loss:" in result.stdout
+    assert "Val loss:" in result.stdout
+    assert "Сохранил лучший чекпоинт:" in result.stdout
+    assert "Сохранил историю:" in result.stdout
