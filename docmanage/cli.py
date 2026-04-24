@@ -122,6 +122,8 @@ def main(argv: list[str] | None = None) -> int:
                     device=args.device,
                     demo=args.demo,
                     seed=args.seed,
+                    example_limit=args.examples,
+                    show_progress=not args.no_progress,
                 ),
             )
             registered_documents = []
@@ -337,6 +339,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Сделать короткий demo-run.",
     )
+    train_parser.add_argument(
+        "--examples",
+        type=int,
+        default=10,
+        help="Сколько примеров сохранить после проверки.",
+    )
+    train_parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Не показывать progress bar.",
+    )
     return parser
 
 
@@ -482,13 +495,18 @@ def render_training_report(result: OcrTrainingResult | None) -> str:
             f"Эпоха {epoch.epoch} из {result.epochs_ran}"
             f" | Train loss: {epoch.train_loss:.4f}"
             f" | Val loss: {epoch.val_loss:.4f}"
+            f" | Ошибка по символам: {epoch.val_cer:.4f}"
+            f" | Точное совпадение: {epoch.exact_match:.1%}"
         )
         if epoch.was_best:
             line += " | сохранил лучший чекпоинт"
         lines.append(line)
 
+    last_epoch = result.history[-1]
     lines.append(f"Лучший val loss: {result.best_val_loss:.4f}")
     lines.append(f"Сохранил лучший чекпоинт: {result.best_checkpoint_path}")
+    lines.append(f"Сохранил матрицу ошибок: {last_epoch.error_matrix_path}")
+    lines.append(f"Сохранил примеры: {last_epoch.examples_path}")
     lines.append(f"Сохранил историю: {result.history_path}")
     lines.append("Обучение завершено.")
     return "\n".join(lines)

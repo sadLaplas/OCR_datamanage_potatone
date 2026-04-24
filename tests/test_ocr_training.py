@@ -31,7 +31,13 @@ def test_training_run_saves_checkpoint_and_history(tmp_path: Path) -> None:
         config,
         dataset_path=dataset_dir,
         output_dir=output_dir,
-        training_config=OcrTrainingConfig(epochs=1, batch_size=4, device="cpu", seed=7),
+        training_config=OcrTrainingConfig(
+            epochs=1,
+            batch_size=4,
+            device="cpu",
+            seed=7,
+            show_progress=False,
+        ),
     )
 
     assert result.epochs_ran == 1
@@ -40,10 +46,18 @@ def test_training_run_saves_checkpoint_and_history(tmp_path: Path) -> None:
     assert result.history_path.exists()
     assert result.history[0].train_loss > 0
     assert result.history[0].val_loss > 0
+    assert result.history[0].val_cer >= 0
+    assert 0 <= result.history[0].exact_match <= 1
+    assert result.history[0].error_matrix_path.exists()
+    assert result.history[0].examples_path.exists()
 
     history = json.loads(result.history_path.read_text(encoding="utf-8"))
     assert history["history"][0]["epoch"] == 1
     assert history["history"][0]["was_best"] is True
+    assert "val_cer" in history["history"][0]
+    assert "exact_match" in history["history"][0]
+    assert "error_matrix_path" in history["history"][0]
+    assert "examples_path" in history["history"][0]
 
 
 def test_demo_run_uses_single_epoch(tmp_path: Path) -> None:
@@ -55,7 +69,13 @@ def test_demo_run_uses_single_epoch(tmp_path: Path) -> None:
         config,
         dataset_path=dataset_dir,
         output_dir=tmp_path / "ocr_training",
-        training_config=OcrTrainingConfig(epochs=3, batch_size=4, device="cpu", demo=True),
+        training_config=OcrTrainingConfig(
+            epochs=3,
+            batch_size=4,
+            device="cpu",
+            demo=True,
+            show_progress=False,
+        ),
     )
 
     assert result.epochs_ran == 1
@@ -68,18 +88,44 @@ def test_train_and_val_epoch_return_losses(tmp_path: Path) -> None:
     generate_ocr_dataset(config, output_dir=dataset_dir, demo=True, seed=5)
 
     charset = build_charset_from_dataset(dataset_dir)
-    training_config = OcrTrainingConfig(epochs=1, batch_size=4, device="cpu")
+    training_config = OcrTrainingConfig(
+        epochs=1,
+        batch_size=4,
+        device="cpu",
+        show_progress=False,
+    )
     train_loader, val_loader = create_ocr_dataloaders(dataset_dir, charset, training_config)
     model = OcrCrnnModel(training_config.model_config, num_classes=charset.size)
     criterion = create_ctc_loss(charset)
     optimizer = torch.optim.Adam(model.parameters(), lr=training_config.learning_rate)
     device = resolve_device("cpu")
 
-    train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, max_batches=1)
-    val_loss = validate_one_epoch(model, val_loader, criterion, device, max_batches=1)
+    train_loss = train_one_epoch(
+        model,
+        train_loader,
+        criterion,
+        optimizer,
+        device,
+        max_batches=1,
+        show_progress=False,
+    )
+    val_result = validate_one_epoch(
+        model,
+        val_loader,
+        criterion,
+        device,
+        charset=charset,
+        eval_dir=tmp_path / "eval",
+        epoch=1,
+        max_batches=1,
+        show_progress=False,
+    )
 
     assert train_loss > 0
-    assert val_loss > 0
+    assert val_result.val_loss > 0
+    assert val_result.val_cer >= 0
+    assert val_result.error_matrix_path.exists()
+    assert val_result.examples_path.exists()
 
 
 def test_ctc_loss_is_computed_on_real_batch(tmp_path: Path) -> None:

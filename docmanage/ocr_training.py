@@ -8,8 +8,19 @@ import torch
 from torch import nn
 from torch.optim import Adam
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 
 from .config import AppConfig
+from .ocr_evaluation import (
+    OcrEvaluationError,
+    OcrPredictionExample,
+    build_error_matrix,
+    character_error_rate,
+    greedy_decode_logits,
+    save_error_matrix_csv,
+    save_prediction_examples,
+    select_prediction_examples,
+)
 from .ocr_dataset import (
     OcrCharset,
     OcrDatasetError,
@@ -35,6 +46,8 @@ class OcrTrainingConfig:
     seed: int = 42
     max_train_batches: int | None = None
     max_val_batches: int | None = None
+    example_limit: int = 10
+    show_progress: bool = True
     model_config: OcrModelConfig = field(default_factory=OcrModelConfig)
 
 
@@ -43,7 +56,21 @@ class OcrTrainingEpoch:
     epoch: int
     train_loss: float
     val_loss: float
+    val_cer: float
+    exact_match: float
     was_best: bool
+    checkpoint_saved: bool
+    error_matrix_path: Path
+    examples_path: Path
+
+
+@dataclass(slots=True, frozen=True)
+class OcrValidationResult:
+    val_loss: float
+    val_cer: float
+    exact_match: float
+    error_matrix_path: Path
+    examples_path: Path
 
 
 @dataclass(slots=True, frozen=True)
@@ -92,6 +119,7 @@ def run_ocr_training(
     best_val_loss = float("inf")
     best_checkpoint_path = training_dir / "best_model.pt"
     history_path = training_dir / "history.json"
+    eval_dir = training_dir / "eval"
 
     epochs_to_run = 1 if actual_config.demo else actual_config.epochs
     train_limit = 2 if actual_config.demo else actual_config.max_train_batches
@@ -105,18 +133,27 @@ def run_ocr_training(
             optimizer=optimizer,
             device=device,
             max_batches=train_limit,
+            epoch=epoch_index,
+            total_epochs=epochs_to_run,
+            show_progress=actual_config.show_progress,
         )
-        val_loss = validate_one_epoch(
+        validation_result = validate_one_epoch(
             model=model,
             loader=val_loader,
             criterion=criterion,
             device=device,
+            charset=charset,
+            eval_dir=eval_dir,
+            epoch=epoch_index,
+            total_epochs=epochs_to_run,
             max_batches=val_limit,
+            example_limit=actual_config.example_limit,
+            show_progress=actual_config.show_progress,
         )
 
-        was_best = val_loss < best_val_loss
+        was_best = validation_result.val_loss < best_val_loss
         if was_best:
-            best_val_loss = val_loss
+            best_val_loss = validation_result.val_loss
             save_best_checkpoint(
                 best_checkpoint_path=best_checkpoint_path,
                 model=model,
@@ -129,8 +166,13 @@ def run_ocr_training(
             OcrTrainingEpoch(
                 epoch=epoch_index,
                 train_loss=train_loss,
-                val_loss=val_loss,
+                val_loss=validation_result.val_loss,
+                val_cer=validation_result.val_cer,
+                exact_match=validation_result.exact_match,
                 was_best=was_best,
+                checkpoint_saved=was_best,
+                error_matrix_path=validation_result.error_matrix_path,
+                examples_path=validation_result.examples_path,
             )
         )
 
@@ -177,7 +219,7 @@ def create_ocr_dataloaders(
         image_height=image_height,
     )
 
-    # Train мешаем, чтобы батчи не были одинаковыми на каждой эпохе.
+    # Обучающие батчи мешаем, чтобы порядок не был одинаковым на каждой эпохе.
     train_loader = DataLoader(
         train_dataset,
         batch_size=min(training_config.batch_size, len(train_dataset)),
@@ -185,7 +227,7 @@ def create_ocr_dataloaders(
         num_workers=training_config.num_workers,
         collate_fn=ocr_collate_fn,
     )
-    # Val оставляем в стабильном порядке, здесь веса уже не меняются.
+    # Проверку оставляем в стабильном порядке, здесь веса уже не меняются.
     val_loader = DataLoader(
         val_dataset,
         batch_size=min(training_config.batch_size, len(val_dataset)),
@@ -207,16 +249,28 @@ def train_one_epoch(
     optimizer: Adam,
     device: torch.device,
     max_batches: int | None = None,
+    epoch: int = 1,
+    total_epochs: int = 1,
+    show_progress: bool = True,
 ) -> float:
     model.train()
     total_loss = 0.0
     batch_count = 0
+    total_batches = count_batches(loader, max_batches)
 
-    for batch_index, batch in enumerate(loader, start=1):
+    progress = tqdm(
+        loader,
+        total=total_batches,
+        desc=f"Эпоха {epoch}/{total_epochs} Обучение",
+        disable=not show_progress,
+        leave=False,
+    )
+
+    for batch_index, batch in enumerate(progress, start=1):
         if max_batches is not None and batch_index > max_batches:
             break
 
-        # Сначала чистим старые градиенты, потом считаем новый loss для текущего батча.
+        # Сначала чистим старые градиенты, потом считаем ошибку для текущего батча.
         optimizer.zero_grad(set_to_none=True)
         loss = compute_ctc_batch_loss(model, batch, criterion, device)
         loss.backward()
@@ -224,6 +278,8 @@ def train_one_epoch(
 
         total_loss += float(loss.item())
         batch_count += 1
+        average_loss = total_loss / batch_count
+        progress.set_postfix(loss=f"{loss.item():.4f}", avg=f"{average_loss:.4f}")
 
     if batch_count == 0:
         raise OcrTrainingError("Train loader пустой.")
@@ -236,34 +292,89 @@ def validate_one_epoch(
     loader: DataLoader,
     criterion: nn.CTCLoss,
     device: torch.device,
+    charset: OcrCharset,
+    eval_dir: Path,
+    epoch: int,
+    total_epochs: int = 1,
     max_batches: int | None = None,
-) -> float:
+    example_limit: int = 10,
+    show_progress: bool = True,
+) -> OcrValidationResult:
     model.eval()
     total_loss = 0.0
     batch_count = 0
+    total_distance = 0
+    total_target_chars = 0
+    exact_matches = 0
+    total_examples = 0
+    pairs: list[tuple[str, str]] = []
+    examples: list[OcrPredictionExample] = []
+    total_batches = count_batches(loader, max_batches)
+    progress = tqdm(
+        loader,
+        total=total_batches,
+        desc=f"Эпоха {epoch}/{total_epochs} Проверка",
+        disable=not show_progress,
+        leave=False,
+    )
 
-    # Валидация только считает loss и не трогает веса модели.
+    # Валидация только считает ошибку и не трогает веса модели.
     with torch.no_grad():
-        for batch_index, batch in enumerate(loader, start=1):
+        for batch_index, batch in enumerate(progress, start=1):
             if max_batches is not None and batch_index > max_batches:
                 break
 
-            loss = compute_ctc_batch_loss(model, batch, criterion, device)
+            loss, logits, output_lengths = compute_ctc_batch_output(
+                model, batch, criterion, device
+            )
             total_loss += float(loss.item())
             batch_count += 1
+
+            predictions = greedy_decode_logits(logits, output_lengths, charset)
+            targets = [str(text) for text in batch["texts"]]
+            sample_ids = [str(sample_id) for sample_id in batch["sample_ids"]]
+            batch_stats = collect_prediction_stats(sample_ids, targets, predictions)
+
+            total_distance += batch_stats["distance"]
+            total_target_chars += batch_stats["target_chars"]
+            exact_matches += batch_stats["exact_matches"]
+            total_examples += len(targets)
+            pairs.extend(zip(targets, predictions))
+            examples.extend(batch_stats["examples"])
+
+            average_loss = total_loss / batch_count
+            progress.set_postfix(loss=f"{loss.item():.4f}", avg=f"{average_loss:.4f}")
 
     if batch_count == 0:
         raise OcrTrainingError("Val loader пустой.")
 
-    return total_loss / batch_count
+    if total_examples == 0:
+        raise OcrTrainingError("Val split пустой.")
+
+    val_loss = total_loss / batch_count
+    val_cer = total_distance / max(1, total_target_chars)
+    exact_match = exact_matches / total_examples
+    error_matrix = build_error_matrix(pairs)
+    selected_examples = select_prediction_examples(examples, example_limit)
+    error_matrix_path = eval_dir / f"error_matrix_epoch_{epoch:03d}.csv"
+    examples_path = eval_dir / f"examples_epoch_{epoch:03d}.jsonl"
+    save_validation_artifacts(error_matrix, selected_examples, error_matrix_path, examples_path, epoch)
+
+    return OcrValidationResult(
+        val_loss=val_loss,
+        val_cer=val_cer,
+        exact_match=exact_match,
+        error_matrix_path=error_matrix_path,
+        examples_path=examples_path,
+    )
 
 
-def compute_ctc_batch_loss(
+def compute_ctc_batch_output(
     model: OcrCrnnModel,
     batch: dict[str, object],
     criterion: nn.CTCLoss,
     device: torch.device,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     images, image_widths, targets, target_lengths = prepare_ctc_batch(batch, device)
     logits, output_lengths = model(images, image_widths)
     validate_ctc_lengths(output_lengths, target_lengths)
@@ -288,6 +399,16 @@ def compute_ctc_batch_loss(
     if not torch.isfinite(loss):
         raise OcrTrainingError("Loss сломался и стал плохим числом.")
 
+    return loss, logits, output_lengths
+
+
+def compute_ctc_batch_loss(
+    model: OcrCrnnModel,
+    batch: dict[str, object],
+    criterion: nn.CTCLoss,
+    device: torch.device,
+) -> torch.Tensor:
+    loss, _, _ = compute_ctc_batch_output(model, batch, criterion, device)
     return loss
 
 
@@ -365,8 +486,7 @@ def save_training_history(
     history: list[OcrTrainingEpoch],
     best_val_loss: float,
 ) -> None:
-    # Историю держим в одном простом json, чтобы потом быстро посмотреть,
-    # как менялись train loss и val loss по эпохам.
+    # Историю держим в одном простом json, чтобы потом быстро посмотреть потери.
     payload = {
         "dataset_path": str(dataset_path),
         "output_dir": str(output_dir),
@@ -386,7 +506,12 @@ def save_training_history(
                 "epoch": item.epoch,
                 "train_loss": item.train_loss,
                 "val_loss": item.val_loss,
+                "val_cer": item.val_cer,
+                "exact_match": item.exact_match,
                 "was_best": item.was_best,
+                "checkpoint_saved": item.checkpoint_saved,
+                "error_matrix_path": str(item.error_matrix_path),
+                "examples_path": str(item.examples_path),
             }
             for item in history
         ],
@@ -446,6 +571,8 @@ def validate_training_config(training_config: OcrTrainingConfig) -> None:
         raise OcrTrainingError("num_workers не может быть отрицательным.")
     if training_config.seed < 0:
         raise OcrTrainingError("Seed не должен быть отрицательным.")
+    if training_config.example_limit < 0:
+        raise OcrTrainingError("Число примеров не должно быть отрицательным.")
 
 
 def resolve_device(device_name: str) -> torch.device:
@@ -473,3 +600,67 @@ def resolve_device(device_name: str) -> torch.device:
 
 def set_training_seed(seed: int) -> None:
     torch.manual_seed(seed)
+
+
+def collect_prediction_stats(
+    sample_ids: list[str],
+    targets: list[str],
+    predictions: list[str],
+) -> dict[str, object]:
+    if len(targets) != len(predictions):
+        raise OcrTrainingError("Prediction и target не совпали по размеру.")
+
+    from .ocr_evaluation import levenshtein_distance
+
+    distance = 0
+    target_chars = 0
+    exact_matches = 0
+    examples: list[OcrPredictionExample] = []
+
+    for sample_id, target, prediction in zip(sample_ids, targets, predictions):
+        item_distance = levenshtein_distance(target, prediction)
+        item_cer = character_error_rate(prediction, target)
+        distance += item_distance
+        target_chars += len(target)
+        exact_matches += int(target == prediction)
+        examples.append(
+            OcrPredictionExample(
+                sample_id=sample_id,
+                target=target,
+                prediction=prediction,
+                cer=item_cer,
+            )
+        )
+
+    return {
+        "distance": distance,
+        "target_chars": target_chars,
+        "exact_matches": exact_matches,
+        "examples": examples,
+    }
+
+
+def save_validation_artifacts(
+    error_matrix: dict[str, dict[str, int]],
+    examples: list[OcrPredictionExample],
+    error_matrix_path: Path,
+    examples_path: Path,
+    epoch: int,
+) -> None:
+    try:
+        error_matrix_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise OcrTrainingError("Не получилось создать папку для оценки.") from error
+
+    try:
+        save_error_matrix_csv(error_matrix, error_matrix_path)
+        save_prediction_examples(examples, examples_path, epoch)
+    except OcrEvaluationError as error:
+        raise OcrTrainingError(str(error)) from error
+
+
+def count_batches(loader: DataLoader, max_batches: int | None) -> int:
+    loader_length = len(loader)
+    if max_batches is None:
+        return loader_length
+    return min(loader_length, max_batches)

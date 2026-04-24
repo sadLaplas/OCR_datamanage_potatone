@@ -372,6 +372,7 @@ def test_cli_trains_ocr_model(tmp_path: Path) -> None:
             "4",
             "--seed",
             "8",
+            "--no-progress",
         ],
         cwd=PROJECT_ROOT,
         capture_output=True,
@@ -385,5 +386,9 @@ def test_cli_trains_ocr_model(tmp_path: Path) -> None:
     assert "Эпоха 1 из 1" in result.stdout
     assert "Train loss:" in result.stdout
     assert "Val loss:" in result.stdout
+    assert "Ошибка по символам:" in result.stdout
+    assert "Точное совпадение:" in result.stdout
     assert "Сохранил лучший чекпоинт:" in result.stdout
+    assert "Сохранил матрицу ошибок:" in result.stdout
+    assert "Сохранил примеры:" in result.stdout
     assert "Сохранил историю:" in result.stdout
