@@ -487,3 +487,99 @@ def test_cli_runs_line_ocr_inference(tmp_path: Path) -> None:
     assert "Распознанный текст:" in result.stdout
     assert "Результат сохранен:" in result.stdout
     assert result_path.exists()
+
+
+def test_cli_checks_line_folder(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "project_name: docmanage-test",
+                "run_mode: test",
+                "data_dir: data",
+                "artifacts_dir: artifacts",
+                "temp_dir: tmp",
+                "log_level: INFO",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    dataset_dir = tmp_path / "ocr_dataset"
+    training_dir = tmp_path / "ocr_training"
+    report_path = tmp_path / "line_report.json"
+
+    generate_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "generate-ocr-data",
+            "--demo",
+            "--mode",
+            "realistic",
+            "--output",
+            str(dataset_dir),
+            "--seed",
+            "15",
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert generate_result.returncode == 0
+
+    train_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "train-ocr",
+            "--dataset",
+            str(dataset_dir),
+            "--output",
+            str(training_dir),
+            "--demo",
+            "--batch-size",
+            "4",
+            "--no-progress",
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert train_result.returncode == 0
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "check-ocr-lines",
+            "--images",
+            str(dataset_dir / "images" / "val"),
+            "--checkpoint",
+            str(training_dir / "best_model.pt"),
+            "--output",
+            str(report_path),
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Проверка строк завершена." in result.stdout
+    assert "Проверяю папку со строками." in result.stdout
+    assert "Нашел изображений:" in result.stdout
+    assert "Разметки нет, сохраняю только предсказания." in result.stdout
+    assert "Отчет сохранен:" in result.stdout
+    assert report_path.exists()

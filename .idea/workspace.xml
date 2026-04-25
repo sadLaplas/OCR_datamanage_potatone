@@ -4,10 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1ecbe7a1-bdf9-4265-8369-473f7e9c3bf2" name="Changes" comment="гридик + улучшенная диагностика">
+    <list default="true" id="1ecbe7a1-bdf9-4265-8369-473f7e9c3bf2" name="Changes" comment="OCR-инференс для отдельной строки">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docmanage/cli.py" beforeDir="false" afterPath="$PROJECT_DIR$/docmanage/cli.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docmanage/ocr_dataset_generation.py" beforeDir="false" afterPath="$PROJECT_DIR$/docmanage/ocr_dataset_generation.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_cli.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_cli.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_ocr_dataset_generation.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_ocr_dataset_generation.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -117,7 +119,15 @@
       <option name="project" value="LOCAL" />
       <updated>1777036064411</updated>
     </task>
-    <option name="localTasksCounter" value="7" />
+    <task id="LOCAL-00007" summary="OCR-инференс для отдельной строки">
+      <option name="closed" value="true" />
+      <created>1777124481061</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1777124481061</updated>
+    </task>
+    <option name="localTasksCounter" value="8" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -141,6 +151,7 @@
     <MESSAGE value="первая OCR-модель" />
     <MESSAGE value="обуча первой модельки" />
     <MESSAGE value="гридик + улучшенная диагностика" />
-    <option name="LAST_COMMIT_MESSAGE" value="гридик + улучшенная диагностика" />
+    <MESSAGE value="OCR-инференс для отдельной строки" />
+    <option name="LAST_COMMIT_MESSAGE" value="OCR-инференс для отдельной строки" />
   </component>
 </project>

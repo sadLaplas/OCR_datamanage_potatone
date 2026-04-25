@@ -28,6 +28,8 @@ def test_generate_dataset_demo_mode_creates_files(tmp_path: Path) -> None:
     assert (output_dir / val_records[0]["image_path"]).exists()
     assert train_records[0]["text"]
     assert train_records[0]["split"] == "train"
+    metadata = json.loads(result.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["generation_mode"] == "clean"
 
 
 def test_generate_dataset_keeps_image_and_text_pair(tmp_path: Path) -> None:
@@ -95,6 +97,40 @@ def test_generate_dataset_raises_for_bad_count(tmp_path: Path) -> None:
 
     with pytest.raises(OcrDatasetError, match="хотя бы 2 примера"):
         generate_ocr_dataset(config, output_dir=tmp_path / "ocr_bad", count=1)
+
+
+def test_generate_dataset_realistic_mode_creates_metadata(tmp_path: Path) -> None:
+    config = prepare_test_config(tmp_path)
+    output_dir = tmp_path / "ocr_realistic"
+
+    result = generate_ocr_dataset(
+        config,
+        output_dir=output_dir,
+        demo=True,
+        seed=19,
+        mode="realistic",
+    )
+
+    metadata = json.loads(result.metadata_path.read_text(encoding="utf-8"))
+    records = read_jsonl(result.train_annotations_path) + read_jsonl(result.val_annotations_path)
+
+    assert result.generation_mode == "realistic"
+    assert metadata["generation_mode"] == "realistic"
+    assert metadata["realistic_effects"]
+    assert records
+    assert (output_dir / records[0]["image_path"]).exists()
+
+
+def test_generate_dataset_raises_for_unknown_mode(tmp_path: Path) -> None:
+    config = prepare_test_config(tmp_path)
+
+    with pytest.raises(OcrDatasetError, match="Режим генерации"):
+        generate_ocr_dataset(
+            config,
+            output_dir=tmp_path / "ocr_unknown",
+            demo=True,
+            mode="too_much",
+        )
 
 
 def read_jsonl(path: Path) -> list[dict[str, object]]:

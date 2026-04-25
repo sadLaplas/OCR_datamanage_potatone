@@ -33,6 +33,11 @@ from .ocr_inference import (
     OcrInferenceResult,
     run_ocr_line_inference,
 )
+from .ocr_line_check import (
+    LineCheckResult,
+    OcrLineCheckError,
+    run_line_folder_check,
+)
 from .ocr_training import (
     OcrTrainingConfig,
     OcrTrainingError,
@@ -59,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
             model_check_result = None
             training_result = None
             inference_result = None
+            line_check_result = None
         elif args.command == "ingest-pdf":
             pdf_result = ingest_pdf(config, args.source)
             registered_documents = []
@@ -69,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
             model_check_result = None
             training_result = None
             inference_result = None
+            line_check_result = None
         elif args.command == "ingest-image":
             image_result = ingest_image(config, args.source)
             registered_documents = []
@@ -79,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
             model_check_result = None
             training_result = None
             inference_result = None
+            line_check_result = None
         elif args.command == "preprocess-image":
             preprocess_result = preprocess_image(config, args.source)
             registered_documents = []
@@ -89,6 +97,7 @@ def main(argv: list[str] | None = None) -> int:
             model_check_result = None
             training_result = None
             inference_result = None
+            line_check_result = None
         elif args.command == "generate-ocr-data":
             dataset_result = generate_ocr_dataset(
                 config,
@@ -97,6 +106,7 @@ def main(argv: list[str] | None = None) -> int:
                 val_ratio=args.val_ratio,
                 seed=args.seed,
                 demo=args.demo,
+                mode=args.mode,
             )
             registered_documents = []
             manifest_path = config.manifest_path
@@ -106,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
             model_check_result = None
             training_result = None
             inference_result = None
+            line_check_result = None
         elif args.command == "check-ocr-model":
             model_check_result = run_ocr_model_check(
                 config,
@@ -121,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
             dataset_result = None
             training_result = None
             inference_result = None
+            line_check_result = None
         elif args.command == "train-ocr":
             training_result = run_ocr_training(
                 config,
@@ -145,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
             dataset_result = None
             model_check_result = None
             inference_result = None
+            line_check_result = None
         elif args.command == "ocr-infer-line":
             inference_result = run_ocr_line_inference(
                 image_path=args.image,
@@ -160,6 +173,24 @@ def main(argv: list[str] | None = None) -> int:
             dataset_result = None
             model_check_result = None
             training_result = None
+            line_check_result = None
+        elif args.command == "check-ocr-lines":
+            line_check_result = run_line_folder_check(
+                images_dir=args.images,
+                checkpoint_path=args.checkpoint,
+                output_path=args.output,
+                ground_truth_path=args.ground_truth,
+                device_name=args.device,
+            )
+            registered_documents = []
+            manifest_path = config.manifest_path
+            pdf_result = None
+            image_result = None
+            preprocess_result = None
+            dataset_result = None
+            model_check_result = None
+            training_result = None
+            inference_result = None
         else:
             registered_documents = []
             manifest_path = config.manifest_path
@@ -170,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
             model_check_result = None
             training_result = None
             inference_result = None
+            line_check_result = None
     except ConfigError as error:
         print(f"Проблема с конфигом: {error}", file=sys.stderr)
         return 1
@@ -197,6 +229,9 @@ def main(argv: list[str] | None = None) -> int:
     except OcrInferenceError as error:
         print(f"Не получилось распознать строку: {error}", file=sys.stderr)
         return 1
+    except OcrLineCheckError as error:
+        print(f"Не получилось проверить строки: {error}", file=sys.stderr)
+        return 1
 
     if args.command == "register":
         logger.info("Файлы добавлены.")
@@ -222,6 +257,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "ocr-infer-line":
         logger.info("Распознавание завершено.")
         print(render_inference_report(inference_result))
+    elif args.command == "check-ocr-lines":
+        logger.info("Проверка строк завершена.")
+        print(render_line_check_report(line_check_result))
     else:
         logger.info("Все ок.")
         print(render_report(config, directory_statuses))
@@ -303,6 +341,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--demo",
         action="store_true",
         help="Сделать маленький demo",
+    )
+    generate_dataset_parser.add_argument(
+        "--mode",
+        choices=("clean", "realistic"),
+        default="clean",
+        help="Режим генерации строк.",
     )
     check_model_parser = subparsers.add_parser(
         "check-ocr-model",
@@ -404,6 +448,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="Куда сохранить JSON с результатом.",
     )
     infer_parser.add_argument(
+        "--device",
+        default="cpu",
+        help="Устройство: cpu, cuda, mps или auto.",
+    )
+    check_lines_parser = subparsers.add_parser(
+        "check-ocr-lines",
+        help="Проверить папку изображений строк.",
+    )
+    check_lines_parser.add_argument(
+        "--images",
+        required=True,
+        help="Папка с изображениями строк.",
+    )
+    check_lines_parser.add_argument(
+        "--checkpoint",
+        required=True,
+        help="Путь к checkpoint.",
+    )
+    check_lines_parser.add_argument(
+        "--ground-truth",
+        default=None,
+        help="JSONL с правильными строками.",
+    )
+    check_lines_parser.add_argument(
+        "--output",
+        required=True,
+        help="Куда сохранить отчет JSON.",
+    )
+    check_lines_parser.add_argument(
         "--device",
         default="cpu",
         help="Устройство: cpu, cuda, mps или auto.",
@@ -511,6 +584,7 @@ def render_dataset_report(result: OcrDatasetResult | None) -> str:
         f"Аннотации train: {result.train_annotations_path}",
         f"Аннотации val: {result.val_annotations_path}",
         f"Метаданные: {result.metadata_path}",
+        f"Режим генерации: {result.generation_mode}",
     ]
 
     if result.fonts_used:
@@ -583,4 +657,25 @@ def render_inference_report(result: OcrInferenceResult | None) -> str:
     ]
     if result.output_path is not None:
         lines.append(f"Результат сохранен: {result.output_path}")
+    return "\n".join(lines)
+
+
+def render_line_check_report(result: LineCheckResult | None) -> str:
+    if result is None:
+        return "Проверка строк пока не запустилась."
+
+    lines = [
+        "Проверяю папку со строками.",
+        f"Папка: {result.images_dir}",
+        f"Нашел изображений: {result.image_count}",
+    ]
+
+    if result.has_ground_truth:
+        lines.append("Разметка найдена, считаю ошибки.")
+        lines.append(f"Средняя ошибка по символам: {result.average_cer:.4f}")
+        lines.append(f"Точных строк: {result.exact_match_rate:.1%}")
+    else:
+        lines.append("Разметки нет, сохраняю только предсказания.")
+
+    lines.append(f"Отчет сохранен: {result.report_path}")
     return "\n".join(lines)
