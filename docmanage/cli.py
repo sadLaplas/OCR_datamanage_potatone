@@ -28,6 +28,11 @@ from .ocr_dataset_generation import (
     generate_ocr_dataset,
 )
 from .ocr_model import OcrModelCheckResult, OcrModelError, run_ocr_model_check
+from .ocr_inference import (
+    OcrInferenceError,
+    OcrInferenceResult,
+    run_ocr_line_inference,
+)
 from .ocr_training import (
     OcrTrainingConfig,
     OcrTrainingError,
@@ -53,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
             dataset_result = None
             model_check_result = None
             training_result = None
+            inference_result = None
         elif args.command == "ingest-pdf":
             pdf_result = ingest_pdf(config, args.source)
             registered_documents = []
@@ -62,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
             dataset_result = None
             model_check_result = None
             training_result = None
+            inference_result = None
         elif args.command == "ingest-image":
             image_result = ingest_image(config, args.source)
             registered_documents = []
@@ -71,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
             dataset_result = None
             model_check_result = None
             training_result = None
+            inference_result = None
         elif args.command == "preprocess-image":
             preprocess_result = preprocess_image(config, args.source)
             registered_documents = []
@@ -80,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
             dataset_result = None
             model_check_result = None
             training_result = None
+            inference_result = None
         elif args.command == "generate-ocr-data":
             dataset_result = generate_ocr_dataset(
                 config,
@@ -96,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
             preprocess_result = None
             model_check_result = None
             training_result = None
+            inference_result = None
         elif args.command == "check-ocr-model":
             model_check_result = run_ocr_model_check(
                 config,
@@ -110,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
             preprocess_result = None
             dataset_result = None
             training_result = None
+            inference_result = None
         elif args.command == "train-ocr":
             training_result = run_ocr_training(
                 config,
@@ -133,6 +144,22 @@ def main(argv: list[str] | None = None) -> int:
             preprocess_result = None
             dataset_result = None
             model_check_result = None
+            inference_result = None
+        elif args.command == "ocr-infer-line":
+            inference_result = run_ocr_line_inference(
+                image_path=args.image,
+                checkpoint_path=args.checkpoint,
+                output_path=args.output,
+                device_name=args.device,
+            )
+            registered_documents = []
+            manifest_path = config.manifest_path
+            pdf_result = None
+            image_result = None
+            preprocess_result = None
+            dataset_result = None
+            model_check_result = None
+            training_result = None
         else:
             registered_documents = []
             manifest_path = config.manifest_path
@@ -142,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
             dataset_result = None
             model_check_result = None
             training_result = None
+            inference_result = None
     except ConfigError as error:
         print(f"Проблема с конфигом: {error}", file=sys.stderr)
         return 1
@@ -166,6 +194,9 @@ def main(argv: list[str] | None = None) -> int:
     except OcrTrainingError as error:
         print(f"Не получилось запустить обучение: {error}", file=sys.stderr)
         return 1
+    except OcrInferenceError as error:
+        print(f"Не получилось распознать строку: {error}", file=sys.stderr)
+        return 1
 
     if args.command == "register":
         logger.info("Файлы добавлены.")
@@ -188,6 +219,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "train-ocr":
         logger.info("Обучение завершено.")
         print(render_training_report(training_result))
+    elif args.command == "ocr-infer-line":
+        logger.info("Распознавание завершено.")
+        print(render_inference_report(inference_result))
     else:
         logger.info("Все ок.")
         print(render_report(config, directory_statuses))
@@ -272,7 +306,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check_model_parser = subparsers.add_parser(
         "check-ocr-model",
-        help="Проверяет OCR модель на одном батче.",
+        help="Проверить OCR-модель на одном батче.",
     )
     check_model_parser.add_argument(
         "--dataset",
@@ -293,7 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     train_parser = subparsers.add_parser(
         "train-ocr",
-        help="Запускает первое обучение OCR модели.",
+        help="Обучить OCR-модель.",
     )
     train_parser.add_argument(
         "--dataset",
@@ -349,6 +383,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-progress",
         action="store_true",
         help="Не показывать progress bar.",
+    )
+    infer_parser = subparsers.add_parser(
+        "ocr-infer-line",
+        help="Распознать одно изображение строки.",
+    )
+    infer_parser.add_argument(
+        "--image",
+        required=True,
+        help="Путь к изображению строки.",
+    )
+    infer_parser.add_argument(
+        "--checkpoint",
+        required=True,
+        help="Путь к checkpoint.",
+    )
+    infer_parser.add_argument(
+        "--output",
+        default=None,
+        help="Куда сохранить JSON с результатом.",
+    )
+    infer_parser.add_argument(
+        "--device",
+        default="cpu",
+        help="Устройство: cpu, cuda, mps или auto.",
     )
     return parser
 
@@ -474,7 +532,7 @@ def render_model_check_report(result: OcrModelCheckResult | None) -> str:
             f"Длины выхода: {result.output_lengths}",
             f"Число классов: {result.num_classes}",
             "Прогон батча прошел нормально.",
-            "Похоже, все работает.",
+            "Проверка прошла.",
         ]
     )
 
@@ -509,4 +567,20 @@ def render_training_report(result: OcrTrainingResult | None) -> str:
     lines.append(f"Сохранил примеры: {last_epoch.examples_path}")
     lines.append(f"Сохранил историю: {result.history_path}")
     lines.append("Обучение завершено.")
+    return "\n".join(lines)
+
+
+def render_inference_report(result: OcrInferenceResult | None) -> str:
+    if result is None:
+        return "Распознавание пока не запустилось."
+
+    lines = [
+        "Загрузил модель.",
+        f"Checkpoint: {result.checkpoint_path}",
+        f"Открыл изображение: {result.image_path}",
+        f"Устройство: {result.device}",
+        f"Распознанный текст: {result.prediction}",
+    ]
+    if result.output_path is not None:
+        lines.append(f"Результат сохранен: {result.output_path}")
     return "\n".join(lines)

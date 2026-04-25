@@ -312,7 +312,7 @@ def test_cli_checks_ocr_model(tmp_path: Path) -> None:
     assert "Входной батч:" in result.stdout
     assert "Выход модели:" in result.stdout
     assert "Прогон батча прошел нормально." in result.stdout
-    assert "Похоже, все работает." in result.stdout
+    assert "Проверка прошла." in result.stdout
 
 
 def test_cli_trains_ocr_model(tmp_path: Path) -> None:
@@ -392,3 +392,98 @@ def test_cli_trains_ocr_model(tmp_path: Path) -> None:
     assert "Сохранил матрицу ошибок:" in result.stdout
     assert "Сохранил примеры:" in result.stdout
     assert "Сохранил историю:" in result.stdout
+
+
+def test_cli_runs_line_ocr_inference(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "project_name: docmanage-test",
+                "run_mode: test",
+                "data_dir: data",
+                "artifacts_dir: artifacts",
+                "temp_dir: tmp",
+                "log_level: INFO",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    dataset_dir = tmp_path / "ocr_dataset"
+    training_dir = tmp_path / "ocr_training"
+    result_path = tmp_path / "line_result.json"
+
+    generate_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "generate-ocr-data",
+            "--demo",
+            "--output",
+            str(dataset_dir),
+            "--seed",
+            "10",
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert generate_result.returncode == 0
+
+    train_result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "train-ocr",
+            "--dataset",
+            str(dataset_dir),
+            "--output",
+            str(training_dir),
+            "--demo",
+            "--batch-size",
+            "4",
+            "--no-progress",
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert train_result.returncode == 0
+
+    image_path = next((dataset_dir / "images" / "train").glob("*.png"))
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "ocr-infer-line",
+            "--image",
+            str(image_path),
+            "--checkpoint",
+            str(training_dir / "best_model.pt"),
+            "--output",
+            str(result_path),
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Распознавание завершено." in result.stdout
+    assert "Загрузил модель." in result.stdout
+    assert "Открыл изображение:" in result.stdout
+    assert "Распознанный текст:" in result.stdout
+    assert "Результат сохранен:" in result.stdout
+    assert result_path.exists()
