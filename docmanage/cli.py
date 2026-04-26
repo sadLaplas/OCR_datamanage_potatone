@@ -21,6 +21,12 @@ from .image_preprocessing import (
     ImagePreprocessResult,
     preprocess_image,
 )
+from .line_extraction import (
+    LineExtractionError,
+    LineExtractionParams,
+    LineExtractionResult,
+    extract_page_lines,
+)
 from .logger import setup_logging
 from .ocr_dataset_generation import (
     OcrDatasetError,
@@ -65,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
             training_result = None
             inference_result = None
             line_check_result = None
+            line_extraction_result = None
         elif args.command == "ingest-pdf":
             pdf_result = ingest_pdf(config, args.source)
             registered_documents = []
@@ -76,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
             training_result = None
             inference_result = None
             line_check_result = None
+            line_extraction_result = None
         elif args.command == "ingest-image":
             image_result = ingest_image(config, args.source)
             registered_documents = []
@@ -87,12 +95,35 @@ def main(argv: list[str] | None = None) -> int:
             training_result = None
             inference_result = None
             line_check_result = None
+            line_extraction_result = None
         elif args.command == "preprocess-image":
             preprocess_result = preprocess_image(config, args.source)
             registered_documents = []
             manifest_path = config.manifest_path
             pdf_result = None
             image_result = None
+            dataset_result = None
+            model_check_result = None
+            training_result = None
+            inference_result = None
+            line_check_result = None
+            line_extraction_result = None
+        elif args.command == "extract-lines":
+            line_extraction_result = extract_page_lines(
+                config,
+                source=args.image,
+                output_dir=args.output,
+                params=LineExtractionParams(
+                    min_line_height=args.min_line_height,
+                    padding=args.padding,
+                    threshold=args.threshold,
+                ),
+            )
+            registered_documents = []
+            manifest_path = config.manifest_path
+            pdf_result = None
+            image_result = None
+            preprocess_result = None
             dataset_result = None
             model_check_result = None
             training_result = None
@@ -117,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
             training_result = None
             inference_result = None
             line_check_result = None
+            line_extraction_result = None
         elif args.command == "check-ocr-model":
             model_check_result = run_ocr_model_check(
                 config,
@@ -133,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
             training_result = None
             inference_result = None
             line_check_result = None
+            line_extraction_result = None
         elif args.command == "train-ocr":
             training_result = run_ocr_training(
                 config,
@@ -158,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
             model_check_result = None
             inference_result = None
             line_check_result = None
+            line_extraction_result = None
         elif args.command == "ocr-infer-line":
             inference_result = run_ocr_line_inference(
                 image_path=args.image,
@@ -174,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
             model_check_result = None
             training_result = None
             line_check_result = None
+            line_extraction_result = None
         elif args.command == "check-ocr-lines":
             line_check_result = run_line_folder_check(
                 images_dir=args.images,
@@ -191,6 +226,7 @@ def main(argv: list[str] | None = None) -> int:
             model_check_result = None
             training_result = None
             inference_result = None
+            line_extraction_result = None
         else:
             registered_documents = []
             manifest_path = config.manifest_path
@@ -202,6 +238,7 @@ def main(argv: list[str] | None = None) -> int:
             training_result = None
             inference_result = None
             line_check_result = None
+            line_extraction_result = None
     except ConfigError as error:
         print(f"Проблема с конфигом: {error}", file=sys.stderr)
         return 1
@@ -216,6 +253,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except ImagePreprocessError as error:
         print(f"Не получилось подготовить картинку: {error}", file=sys.stderr)
+        return 1
+    except LineExtractionError as error:
+        print(f"Не получилось выделить строки: {error}", file=sys.stderr)
         return 1
     except OcrDatasetError as error:
         print(f"Не получилось собрать датасет: {error}", file=sys.stderr)
@@ -245,6 +285,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "preprocess-image":
         logger.info("Обработка завершена.")
         print(render_preprocess_report(preprocess_result))
+    elif args.command == "extract-lines":
+        logger.info("Строки выделены.")
+        print(render_line_extraction_report(line_extraction_result))
     elif args.command == "generate-ocr-data":
         logger.info("Готово.")
         print(render_dataset_report(dataset_result))
@@ -309,6 +352,37 @@ def build_parser() -> argparse.ArgumentParser:
     preprocess_image_parser.add_argument(
         "source",
         help="Путь к картинке или document_id зарегистрированного изображения.",
+    )
+    extract_lines_parser = subparsers.add_parser(
+        "extract-lines",
+        help="Вырезать строки из одной страницы.",
+    )
+    extract_lines_parser.add_argument(
+        "image",
+        help="Путь к PNG/JPG/JPEG с одной страницей.",
+    )
+    extract_lines_parser.add_argument(
+        "--output",
+        default=None,
+        help="Куда сохранить строки.",
+    )
+    extract_lines_parser.add_argument(
+        "--min-line-height",
+        type=int,
+        default=6,
+        help="Минимальная высота строки.",
+    )
+    extract_lines_parser.add_argument(
+        "--padding",
+        type=int,
+        default=4,
+        help="Отступ вокруг строки.",
+    )
+    extract_lines_parser.add_argument(
+        "--threshold",
+        type=int,
+        default=None,
+        help="Порог бинаризации от 0 до 255.",
     )
     generate_dataset_parser = subparsers.add_parser(
         "generate-ocr-data",
@@ -569,6 +643,22 @@ def render_preprocess_report(result: ImagePreprocessResult | None) -> str:
 
     lines.append(f"Сохранил результат: {result.preprocessed_image_path}")
     lines.append(f"Сохранил метаданные: {result.metadata_path}")
+    return "\n".join(lines)
+
+
+def render_line_extraction_report(result: LineExtractionResult | None) -> str:
+    if result is None:
+        return "Строки пока не выделены."
+
+    lines = [
+        "Открыл страницу",
+        f"Файл: {result.source_image_path}",
+        "Ищу строки",
+        f"Нашел {result.line_count} строк",
+        f"Сохранил строки сюда: {result.lines_dir}",
+        f"Сохранил manifest: {result.manifest_path}",
+        f"Сохранил картинку для проверки: {result.preview_path}",
+    ]
     return "\n".join(lines)
 
 

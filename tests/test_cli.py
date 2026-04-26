@@ -203,6 +203,53 @@ def test_cli_preprocesses_image(tmp_path: Path) -> None:
     assert "Сохранил метаданные:" in result.stdout
 
 
+def test_cli_extracts_lines_from_page_image(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "project_name: docmanage-test",
+                "run_mode: test",
+                "data_dir: data",
+                "artifacts_dir: artifacts",
+                "temp_dir: tmp",
+                "log_level: INFO",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    image_path = create_document_like_image(tmp_path / "page.png")
+    output_dir = tmp_path / "lines"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "extract-lines",
+            str(image_path),
+            "--output",
+            str(output_dir),
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Строки выделены." in result.stdout
+    assert "Открыл страницу" in result.stdout
+    assert "Ищу строки" in result.stdout
+    assert "Нашел 8 строк" in result.stdout
+    assert "Сохранил строки сюда:" in result.stdout
+    assert "Сохранил manifest:" in result.stdout
+    assert (output_dir / "line_manifest.json").exists()
+    assert (output_dir / "lines_preview.png").exists()
+
+
 def test_cli_generates_ocr_dataset(tmp_path: Path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
