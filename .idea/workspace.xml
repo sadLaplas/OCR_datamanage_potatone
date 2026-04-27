@@ -4,10 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="1ecbe7a1-bdf9-4265-8369-473f7e9c3bf2" name="Changes" comment="Дообучение для больших строк">
+    <list default="true" id="1ecbe7a1-bdf9-4265-8369-473f7e9c3bf2" name="Changes" comment="Выделение строк">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docmanage/cli.py" beforeDir="false" afterPath="$PROJECT_DIR$/docmanage/cli.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docmanage/ocr_inference.py" beforeDir="false" afterPath="$PROJECT_DIR$/docmanage/ocr_inference.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tests/test_cli.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_cli.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_project_state.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/test_project_state.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -133,7 +135,15 @@
       <option name="project" value="LOCAL" />
       <updated>1777153150412</updated>
     </task>
-    <option name="localTasksCounter" value="9" />
+    <task id="LOCAL-00009" summary="Выделение строк">
+      <option name="closed" value="true" />
+      <created>1777221344102</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1777221344102</updated>
+    </task>
+    <option name="localTasksCounter" value="10" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -159,6 +169,7 @@
     <MESSAGE value="гридик + улучшенная диагностика" />
     <MESSAGE value="OCR-инференс для отдельной строки" />
     <MESSAGE value="Дообучение для больших строк" />
-    <option name="LAST_COMMIT_MESSAGE" value="Дообучение для больших строк" />
+    <MESSAGE value="Выделение строк" />
+    <option name="LAST_COMMIT_MESSAGE" value="Выделение строк" />
   </component>
 </project>

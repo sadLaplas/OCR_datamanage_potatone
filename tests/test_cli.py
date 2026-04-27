@@ -1,7 +1,14 @@
+import json
 import subprocess
 import sys
 from pathlib import Path
 
+import torch
+
+from docmanage.config import load_config, prepare_directories
+from docmanage.ocr_dataset import build_charset_from_dataset
+from docmanage.ocr_dataset_generation import generate_ocr_dataset
+from docmanage.ocr_model import OcrCrnnModel, OcrModelConfig
 from tests.image_helpers import create_document_like_image, create_image
 from tests.pdf_helpers import create_pdf
 
@@ -248,6 +255,58 @@ def test_cli_extracts_lines_from_page_image(tmp_path: Path) -> None:
     assert "Сохранил manifest:" in result.stdout
     assert (output_dir / "line_manifest.json").exists()
     assert (output_dir / "lines_preview.png").exists()
+
+
+def test_cli_runs_page_ocr_from_line_manifest(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "project_name: docmanage-test",
+                "run_mode: test",
+                "data_dir: data",
+                "artifacts_dir: artifacts",
+                "temp_dir: tmp",
+                "log_level: INFO",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    manifest_path, checkpoint_path = prepare_page_ocr_cli_files(tmp_path, config_path)
+    output_dir = tmp_path / "page_text"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "docmanage",
+            "--config",
+            str(config_path),
+            "ocr-page-lines",
+            "--manifest",
+            str(manifest_path),
+            "--checkpoint",
+            str(checkpoint_path),
+            "--output",
+            str(output_dir),
+            "--no-progress",
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Страница распознана." in result.stdout
+    assert "Загружаю manifest" in result.stdout
+    assert "Нашел 2 строк" in result.stdout
+    assert "Загружаю модель" in result.stdout
+    assert "Распознаю строки" in result.stdout
+    assert "Сохранил результат:" in result.stdout
+    assert "Сохранил текст:" in result.stdout
+    assert (output_dir / "page_text.json").exists()
+    assert (output_dir / "page_text.txt").exists()
 
 
 def test_cli_generates_ocr_dataset(tmp_path: Path) -> None:
@@ -630,3 +689,60 @@ def test_cli_checks_line_folder(tmp_path: Path) -> None:
     assert "Разметки нет, сохраняю только предсказания." in result.stdout
     assert "Отчет сохранен:" in result.stdout
     assert report_path.exists()
+
+
+def prepare_page_ocr_cli_files(
+    tmp_path: Path,
+    config_path: Path,
+) -> tuple[Path, Path]:
+    config = load_config(config_path)
+    prepare_directories(config)
+    dataset_dir = tmp_path / "ocr_dataset_for_page"
+    generate_ocr_dataset(config, output_dir=dataset_dir, demo=True, seed=21)
+    image_paths = sorted((dataset_dir / "images" / "train").glob("*.png"))[:2]
+
+    manifest_path = tmp_path / "line_manifest.json"
+    manifest_payload = {
+        "source_image": str(tmp_path / "page.png"),
+        "line_count": 2,
+        "lines": [
+            {
+                "line_id": "line_0001",
+                "image_path": str(image_paths[0]),
+                "bbox": [0, 10, 120, 30],
+            },
+            {
+                "line_id": "line_0002",
+                "image_path": str(image_paths[1]),
+                "bbox": [0, 40, 120, 60],
+            },
+        ],
+    }
+    manifest_path.write_text(
+        json.dumps(manifest_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    charset = build_charset_from_dataset(dataset_dir)
+    model_config = OcrModelConfig()
+    model = OcrCrnnModel(model_config, num_classes=charset.size)
+    checkpoint_path = tmp_path / "page_ocr_model.pt"
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "charset": list(charset.characters),
+            "blank_index": charset.blank_index,
+            "model_config": {
+                "input_channels": model_config.input_channels,
+                "conv_channels": list(model_config.conv_channels),
+                "lstm_hidden_size": model_config.lstm_hidden_size,
+                "lstm_num_layers": model_config.lstm_num_layers,
+                "dropout": model_config.dropout,
+                "image_height": model_config.image_height,
+            },
+            "best_val_loss": 0.0,
+        },
+        checkpoint_path,
+    )
+
+    return manifest_path, checkpoint_path

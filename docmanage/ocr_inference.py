@@ -25,17 +25,33 @@ class OcrInferenceResult:
     device: str
 
 
+@dataclass(slots=True, frozen=True)
+class OcrInferenceSession:
+    checkpoint_path: Path
+    charset: OcrCharset
+    model_config: OcrModelConfig
+    model: OcrCrnnModel
+    device: torch.device
+
+
 def run_ocr_line_inference(
     image_path: str | Path,
     checkpoint_path: str | Path,
     output_path: str | Path | None = None,
     device_name: str = "cpu",
 ) -> OcrInferenceResult:
-    actual_image_path = resolve_existing_file(
-        image_path,
-        missing_message="Файл изображения не найден",
-        directory_message="Путь к изображению указывает на папку",
+    session = load_ocr_inference_session(checkpoint_path, device_name=device_name)
+    return run_ocr_line_inference_with_session(
+        image_path=image_path,
+        session=session,
+        output_path=output_path,
     )
+
+
+def load_ocr_inference_session(
+    checkpoint_path: str | Path,
+    device_name: str = "cpu",
+) -> OcrInferenceSession:
     actual_checkpoint_path = resolve_existing_file(
         checkpoint_path,
         missing_message="Не нашел checkpoint",
@@ -47,31 +63,54 @@ def run_ocr_line_inference(
     model_config = load_model_config_from_checkpoint(checkpoint)
     model = load_model_from_checkpoint(checkpoint, model_config, charset, device)
 
-    image_tensor = prepare_line_image(actual_image_path, model_config, device)
+    return OcrInferenceSession(
+        checkpoint_path=actual_checkpoint_path,
+        charset=charset,
+        model_config=model_config,
+        model=model,
+        device=device,
+    )
+
+
+def run_ocr_line_inference_with_session(
+    image_path: str | Path,
+    session: OcrInferenceSession,
+    output_path: str | Path | None = None,
+) -> OcrInferenceResult:
+    actual_image_path = resolve_existing_file(
+        image_path,
+        missing_message="Файл изображения не найден",
+        directory_message="Путь к изображению указывает на папку",
+    )
+    image_tensor = prepare_line_image(
+        actual_image_path,
+        session.model_config,
+        session.device,
+    )
     image_widths = torch.tensor([image_tensor.shape[-1]], dtype=torch.long)
 
-    model.eval()
+    session.model.eval()
     with torch.no_grad():
-        logits, output_lengths = model(image_tensor, image_widths)
+        logits, output_lengths = session.model(image_tensor, image_widths)
 
     try:
-        prediction = greedy_decode_logits(logits, output_lengths, charset)[0]
+        prediction = greedy_decode_logits(logits, output_lengths, session.charset)[0]
     except OcrEvaluationError as error:
         raise OcrInferenceError(str(error)) from error
 
     actual_output_path = save_inference_result(
         output_path=output_path,
         image_path=actual_image_path,
-        checkpoint_path=actual_checkpoint_path,
+        checkpoint_path=session.checkpoint_path,
         prediction=prediction,
     )
 
     return OcrInferenceResult(
         image_path=actual_image_path,
-        checkpoint_path=actual_checkpoint_path,
+        checkpoint_path=session.checkpoint_path,
         prediction=prediction,
         output_path=actual_output_path,
-        device=device.type,
+        device=session.device.type,
     )
 
 
